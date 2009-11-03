@@ -1,0 +1,3 @@
+insmod build/mid_target.ko
+insmod build/isp_scsi_target.ko
+insmod build/isp_mod.ko

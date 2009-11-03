@@ -1,0 +1,9 @@
+I am no longer a committer with FreeBSD, however, I will continue to
+add bug fixes here. I may or may not actually synchronize with changes
+made with FreeBSD (if any).
+
+Some of the recent work has required changes in FreeBSD. Here is
+a diff for CURRENT as of this date: Sun May 31 20:42:57 PDT 2009
+
+Most of it would also apply to RELENG_7. This adds 8Gb support amongst
+other (mostly target) fixes.

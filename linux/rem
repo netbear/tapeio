@@ -1,0 +1,3 @@
+rmmod build/isp_mod.ko
+rmmod build/isp_scsi_target.ko
+rmmod build/mid_target.ko

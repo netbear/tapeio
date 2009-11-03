@@ -1,0 +1,58 @@
+#!/bin/sh
+#
+# CDDL HEADER START
+#
+# The contents of this file are subject to the terms of the
+# Common Development and Distribution License (the "License").
+# You may not use this file except in compliance with the License.
+#
+# You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
+# or http://www.opensolaris.org/os/licensing.
+# See the License for the specific language governing permissions
+# and limitations under the License.
+#
+# When distributing Covered Code, include this CDDL HEADER in each
+# file and include the License file at usr/src/OPENSOLARIS.LICENSE.
+# If applicable, add the following below this CDDL HEADER, with the
+# fields enclosed by brackets "[]" replaced with your own identifying
+# information: Portions Copyright [yyyy] [name of copyright owner]
+#
+# CDDL HEADER END
+#
+#
+# Copyright 2008 Sun Microsystems, Inc.  All rights reserved.
+# Use is subject to license terms.
+#
+############################################################################
+# Stupid Helper Script to generate correct compilation flags for a kernel
+# module based upon type of compiler and version. Yes, a job for libtool.
+#
+CC=${CC-cc}
+# Step 1- Is the compiler Sun Studio or GCC?
+
+2>&1 ${CC} -V | grep Sun > /dev/null
+issun=$?
+if [ ${issun} -eq 0 ]; then
+ case `uname -m` in
+ sparc)
+   echo '-xchip=ultra'
+   ;;
+ i86pc)
+   spv=`2>&1 cc -V|head -1|sed -e 's/^.*Sun C 5.//' -e 's/ .*$//'`
+   if [ $spv -lt 9 ]; then
+     echo '-xarch=generic64'
+   else
+     echo '-m64'
+   fi
+   ;;
+ esac
+else
+ 2>&1 ${CC} --version |grep GCC > /dev/null
+ isgcc=$?
+ if [ ${isgcc} -eq  0 ]; then
+  true
+ else
+  true
+ fi
+fi
+exit 0
