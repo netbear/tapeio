@@ -16,8 +16,8 @@
 //# define DEBUG_SCSI_DONE
 //# define DEBUG_ALLOCN_LEN
 //# define DEBUG_RX_DATA
-//# define DEBUG_HANDLE_CMD
-# define DEBUG_SCSI_THREAD
+# define DEBUG_HANDLE_CMD
+//# define DEBUG_SCSI_THREAD
 //# define DEBUG_TE_CMD
 
 
@@ -1403,8 +1403,8 @@ static int get_space (Target_Scsi_Cmnd* cmd, unsigned int space /* in bytes */)
 {
 	/* We assume that scatter gather is used universally */
 	struct scatterlist	*st_buffer = NULL;
-	int buff_needed, i, sg_count;
-	//unsigned int count=0;
+	int buff_needed, i;
+	unsigned int count=0;
 	//unsigned long flags;
 	int page_size = PAGE_SIZE;
 	unsigned long order = 0;				
@@ -1416,14 +1416,16 @@ static int get_space (Target_Scsi_Cmnd* cmd, unsigned int space /* in bytes */)
     unsigned char * stml_buf = NULL;
 	//int				num =0;
 	//int				rem = space;
-    //
+
     if (cmd == NULL)
     {
-        printk("error when get_space : Null cmd!\n");
+        printk("error when get_space : null cmd!\n");
         return -1;
     }
+
 	if(!stml_devp)
 	{
+        printk("error when get_space : null stml_devp!\n");
 		return -1;
 	}
 	#endif
@@ -1487,80 +1489,24 @@ static int get_space (Target_Scsi_Cmnd* cmd, unsigned int space /* in bytes */)
 	*the scsi_raid card can handle max pages is (128-12)/2,about 60 pages.
 	*/
 
-
-    sg_count = 0;
-    while (buff_needed >= MAX_PAGES_PER_BUFFER) {
-        sg_count ++;
-        buff_needed -= MAX_PAGES_PER_BUFFER;
+// should use small blocks of memory instead of large area
+    while(buff_needed>PAGES_PER_DEVICE) {
+        order++;
+        page_size *= 2;
+        buff_needed = space/page_size;
+        if(space>(buff_needed*page_size))
+            buff_needed ++;
     }
-    
-    order = 8;
 
-    if (buff_needed)
-        sg_count ++;
-
-    while (buff_needed && buff_needed <= (1 << (order-1)))
-        order --;
-
-	st_buffer = (struct scatterlist*) kmalloc(sg_count * sizeof (struct scatterlist), GFP_KERNEL|GFP_ATOMIC);
-	if (!st_buffer) {
-		printk ("get_space: no space for st_buffer\n");
-		return (-1);
-	}
-    sg_init_table(st_buffer, sg_count);
-
-    temp = &(cmd->reserve);
-	/* get necessary buffer space */
-    for (i = 0;i < sg_count - 1; i++)
+    if(order>=9)  //max in kernel 
     {
-        stml_buf = (unsigned char*) __get_free_pages (/*GFP_DMA |*/ GFP_KERNEL, 8);
-
-		if(!stml_buf)
-		{
-			printk("get space:get_free_pages error.\n");
-			return -1;
-		}
-		
-        sg_set_buf(&st_buffer[i], (void *)stml_buf, PAGE_SIZE * MAX_PAGES_PER_BUFFER);
-        temp->buf[i] = stml_buf; 
-        temp->order[i] = 8;
-
-# ifdef DEBUG_HANDLE_CMD
-        printk ("st_buffer[%d] order = %ld\n", i, order);
-# endif
-	}
-    stml_buf = (unsigned char *)__get_free_pages(GFP_KERNEL | GFP_ATOMIC, order);
-        
-	if(!stml_buf)
-	{
-		printk("get space:get_free_pages error.\n");
-		return -1;
-    }
-    sg_set_buf(&st_buffer[sg_count - 1], (void *)stml_buf, PAGE_SIZE * (1 << order));
-    temp->buf[sg_count - 1] = stml_buf;
-    temp->order[i] = order;
-
-# ifdef DEBUG_HANDLE_CMD
-        printk ("st_buffer[%d] order = %ld\n", i, order);
-# endif
-
-
-	/*while(buff_needed>PAGES_PER_DEVICE) {
-		order++;
-		page_size *= 2;
-		buff_needed = space/page_size;
-		if(space>(buff_needed*page_size))
-			buff_needed ++;
-	}
-
-	if(order>=9)  //max in kernel 
-	{
-		printk("get space:space  %d is too large!!!\n",space);
+        printk("get space:space  %d is too large!!!\n",space);
 		return -1;
 	}
 
 	
 	st_buffer = (struct scatterlist*) kmalloc(buff_needed * sizeof (struct scatterlist), GFP_KERNEL|GFP_ATOMIC);
+    
 	if (!st_buffer) {
 		printk ("get_space: no space for st_buffer\n");
 		return (-1);
@@ -1579,31 +1525,35 @@ static int get_space (Target_Scsi_Cmnd* cmd, unsigned int space /* in bytes */)
 			return -1;
 		}
 		
-        sg_set_buf(&st_buffer[i], (void *)stml_buf, page_size);
+        if (count > page_size)
+            sg_set_buf(&st_buffer[i], (void *)stml_buf, page_size);
+        else
+            sg_set_buf(&st_buffer[i], (void *)stml_buf, count);
+
         temp->buf[i] = stml_buf;
         
 
 # ifdef DEBUG_HANDLE_CMD
-        //printk ("st_buffer[%d] order = %ld\n", i, order);
+        printk ("st_buffer[%d] order = %ld\n", i, order);
 # endif
-	}*/
+	}
 
 	temp->scatterlist_buf = st_buffer;
     temp->page_size = page_size;
     temp->used = 1;
     temp->cmd_id = cmd->id;
-    temp->k_use_sg = sg_count;
-    temp->sglist_len = sg_count * sizeof(struct scatterlist);
+    temp->k_use_sg = buff_needed;
+    temp->sglist_len = buff_needed * sizeof(struct scatterlist);
 
-	cmd->buf_len = (sg_count - 1) * MAX_PAGES_PER_BUFFER * PAGE_SIZE + (1 << order) * PAGE_SIZE;
+	cmd->buf_len = space;
 	cmd->sglist = st_buffer;
-	cmd->sglist_len = sg_count * sizeof( struct scatterlist );
-	cmd->use_sg = sg_count;
+	cmd->sglist_len = buff_needed * sizeof( struct scatterlist );
+	cmd->use_sg = buff_needed;
 
-	use_mem += cmd->buf_len;
+	use_mem += space;
 	
 #ifdef DISKIO
-	stml_devp->current_data += cmd->buf_len;
+	stml_devp->current_data += space;
 #endif
 
 //printk("get space:opcode:%2xh id:%d space:%d st_buffer:%p order:%ld sr_use_sg:%d\n",
@@ -1620,8 +1570,9 @@ static int free_tmd(Target_Scsi_Cmnd * cmd_copy)
 {
     struct scatterlist * st_list=NULL;
     int i=0;
-    //int order = 0;
-    //int page_size = PAGE_SIZE;
+    unsigned int order = 0;
+    int page_size = PAGE_SIZE;
+    unsigned int length;
     
     stml_device *stml_devp;
     stml_scatter_hold *temp;
@@ -1631,9 +1582,6 @@ static int free_tmd(Target_Scsi_Cmnd * cmd_copy)
     if(!cmd_copy)
         return -1;
 
-    // warning : for test!!!
-    return 0;
-
 # ifdef DISKIO
     
     stml_devp = cmd_copy->stml_devp;
@@ -1642,7 +1590,6 @@ static int free_tmd(Target_Scsi_Cmnd * cmd_copy)
     
     if((stml_devp!=NULL)&&(st_list!=NULL)) {
         //printk("free cmnd:try to know if use the device buffer.id:%d st_list:%p\n",cmd_copy->id,st_list);
-        //stml_devp->current_data -=cmd_copy->req->sr_bufflen;
         
         spin_lock_irqsave (&stml_devp->get_mem, flags);
         
@@ -1684,7 +1631,7 @@ static int free_tmd(Target_Scsi_Cmnd * cmd_copy)
         }
         else
         {
-            //printk("free_cmnd:strange,st_list is NULL. cmdid:%d  opcode:%2xh\n",cmd_copy->id,cmd_copy->cmd[0]);
+            printk("free_cmnd:strange,st_list is NULL. cmdid:%d  opcode:%2xh\n",cmd_copy->id,cmd_copy->cmd[0]);
         }
     }
 
@@ -1695,17 +1642,23 @@ static int free_tmd(Target_Scsi_Cmnd * cmd_copy)
     if((st_list!=NULL))
     {
         temp = &(cmd_copy->reserve);
-        //    printk("free cmd:the cmd didn't use the device buf.id: %d length:%d\n",cmd_copy->id,length);
+        //printk("free cmd:the cmd didn't use the device buf.id: %d length:%d\n",cmd_copy->id,length);
         stml_devp->current_data -= cmd_copy->buf_len;
         use_mem -= cmd_copy->buf_len;
 
-        // printk("\tfree cmd:cmdid:%d st_buffer:%p order:%d  sr_use_sg:%d\n",
-        // cmd_copy->id,st_list,order,cmd_copy->req->sr_use_sg);
+        length = st_list[0].length;
+        order = 0;
 
-        for (i = 0; i < temp->k_use_sg; i++)
+        while (length > page_size)
         {
-            free_pages ((unsigned long)temp->buf[i], temp->order[i]);
-            //printk("free page for cmd %d, order %d\n", cmd_copy->id, temp->order[i]);
+            page_size *= 2;
+            order ++;
+        }
+
+        for (i = 0; i < cmd_copy->use_sg; i++)
+        {
+            free_pages ((unsigned long)sg_virt(&st_list[i]), order);
+            printk("free page for cmd %d, order %d\n", cmd_copy->id, order);
         }
 
         /* free up scatterlist */
@@ -1713,19 +1666,6 @@ static int free_tmd(Target_Scsi_Cmnd * cmd_copy)
             kfree (st_list); 
     }
     
-    /* free up Scsi_Request */
-
-# else
-    // by netbear : should never be used:
-    /*
-    for (i = 0; i < cmd_copy->req->sr_use_sg; i++)
-        free_page ((long int)st_list[i].address);
-    
-    // free up scatterlist
-    if (cmd_copy->req->sr_use_sg)
-        kfree (st_list);
-    kfree (cmd_copy->req);
-    */
 # endif
     
     // free up Target_Scsi_Cmnd
@@ -2097,80 +2037,12 @@ static inline void aen_notify (int fn, __u64 lun)
 
 #ifdef DISKIO
 
-/*static int scan_dev_type(const char * leadin,My_scsi_idlun* my_idlun, int * host_no)
-{
-    char		*tmp;
-    int		error;
-    mm_segment_t 	old_fs;
-    struct file	*dev_file;
-    old_fs = get_fs();
-    set_fs(get_ds());
-    tmp	= getname (leadin);
-    set_fs (old_fs);
-    error = PTR_ERR (tmp);
-    
-    if (IS_ERR(tmp)) {
-        printk ("scan_dev_type: getname returned an error %d\n", error);
-        return error;
-    }
-    
-    dev_file= filp_open(tmp, O_RDONLY | O_NONBLOCK, 0);
-    printk("open filp : %s\n", tmp);
-    putname (tmp);
-    
-    if (IS_ERR (dev_file)) {
-        error = PTR_ERR (dev_file);
-        printk ("scan_dev_type: dev_file error %d %s\n", error,tmp);
-        return error;
-    }
-
-    if (dev_file->f_op == NULL)
-        printk("f_op null!\n");
-    else {
-        if (dev_file->f_op->ioctl == NULL)
-            printk("f_op->ioctl null!\n");
-        if (dev_file->f_op->read == NULL)
-            printk("f_op->read null\n");
-    }
-    if ((dev_file) && (dev_file->f_op) && (dev_file->f_op->ioctl)) {
-        old_fs = get_fs();
-        set_fs (get_ds());
-        error = dev_file->f_op->ioctl (dev_file->f_dentry->d_inode, dev_file, SCSI_IOCTL_GET_IDLUN,(unsigned long) (my_idlun));
-        if (error < 0) {
-            printk ("scan_dev_type: ioctl error %d\n", error);
-            return error;
-        }
-        set_fs (old_fs);
-    }
-
-    if ((dev_file) && (dev_file->f_op) && (dev_file->f_op->ioctl)) {
-        old_fs = get_fs(); set_fs (get_ds());
-        error = dev_file->f_op->ioctl (dev_file->f_dentry->d_inode, dev_file, SCSI_IOCTL_GET_BUS_NUMBER,(unsigned long)( host_no));  
-       
-        printk("ioctl : %d\n", *host_no);
-        if (error < 0) {
-            printk ("scan_dev_type: ioctl error %d\n", error);
-            return error;
-        }
-        set_fs (old_fs);
-    }
-    
-    error = filp_close (dev_file, NULL);
-    if( error<0 ) {
-        printk ("scan_dev_type: filp_close error %d\n", error);
-        return error;
-    }
-    
-    return 0;
-}*/
-
-
 static void make_dev_name(char * fname, const char * leadin, int k, 
                           int do_numeric)
 {
     char buff[64];
     int  big,little;
-    static int no = 0;
+    static int no = 1;
 
     strcpy(fname, leadin ? leadin : "/dev/sg");
     if (do_numeric) {
@@ -2201,11 +2073,6 @@ static void make_dev_name(char * fname, const char * leadin, int k,
 
 int	get_device_name(stml_device *  devp)
 {
-	//int	k;
-	//unsigned char	temp[DEVICE_NAME_LENGTH];
-	//My_scsi_idlun my_idlun;
-    //int host_no = -1;
-
 	if(devp == NULL)
 		return 0;
     
@@ -2218,41 +2085,6 @@ int	get_device_name(stml_device *  devp)
 
     printk("device %s : host %d id %d lun %d channel %d\n",devp->target_device_name, devp->host_no, devp->id,
             devp->lun, devp->channel);
-	/*for(k=0;k<MAX_DEVICES;k++)
-	{
-		if(TYPE_DISK == devp->type )
-		{
-			make_dev_name(temp, "/dev/sd", k, 0);
-		}
-		else if (TYPE_TAPE == devp->type )
-		{
-			make_dev_name(temp, "/dev/st", k, 1);
-		} else {
-			printk("get_device_name:Unkown type device!\n");
-			return 0;
-		}
-		
-		/if(scan_dev_type(temp,&my_idlun,&host_no)!=0)
-		{
-			printk("get_device_name:error.%s\n",temp);
-			strcpy(devp->target_device_name,"Unkown");
-		}
-
-        printk("device %s : host %d id %d lun %d channel %d\n",temp, host_no, my_idlun.dev_id & 0xff,
-               my_idlun.dev_id >> 8, my_idlun.dev_id >> 16);
-
-                
-    	if ((host_no == devp->host_no) && ((my_idlun.dev_id & 0xff) == devp->id) &&
-	        (((my_idlun.dev_id >> 8) & 0xff) == devp->lun) &&
-	        (((my_idlun.dev_id >> 16) & 0xff) == devp->channel))
-        {
-            if(TYPE_DISK == devp->type )
-                make_dev_name(devp->target_device_name,"/dev/sd",k,0);
-			else if(TYPE_TAPE == devp ->type)
-                make_dev_name(devp->target_device_name,"/dev/st",k,1);
-    			return 1;
-        } 
-	}*/
 	return 0;
 }
 
@@ -2371,8 +2203,10 @@ static inline int fill_scsi_device (void)
         shost_for_each_device(the_device,the_host) {
 #ifdef PROTECT_SYSTEM_DISK
             if(sys==0){
-            // if(the_device)the_device=the_device->next;//just for the test
-                sys=1;
+                if(the_device) {
+                    sys = 1;
+                    continue;//just for the test
+                }
             }
 # endif
             printk("found device with type %d\n", the_device->type);
@@ -2389,9 +2223,9 @@ static inline int fill_scsi_device (void)
                     return (-1);
                 }
                 stml_devp->host_no = the_device->host->host_no;
+                stml_devp->channel = the_device->channel;
                 stml_devp->id  = the_device->id;
                 stml_devp->lun = the_device->lun;
-                stml_devp->channel = the_device->channel;
                 stml_devp->stml_id = target_data.device_num;
                 printk("Found scsi device : %d %d %d\n", stml_devp->id, stml_devp->lun, stml_devp->channel);
                 /* warning by netbear : I am not sure whether we should hold this pointer,
@@ -2418,12 +2252,16 @@ static inline int fill_scsi_device (void)
                     current_devp = current_devp->next;
                 }
             } // end if
+            else
+            {
+                printk("fill_scsi_device type %x: %d %d %d\n",the_device->type, the_device->id, the_device->lun, the_device->channel);
+            }
         } // end shost_for_each_device
         scsi_host_put(the_host);
     }
 
     spin_unlock_irqrestore (&target_data.add_delete_device, flags);
-
+    
     if (target_data.device_num == 0) {
         printk ("fill_scsi_device: could not find a SCSI device on the system .. this mode of operation is doomed for failure bailing out\n");
         return (-1);
@@ -2472,6 +2310,22 @@ static int handle_cmd (Target_Scsi_Cmnd *cmnd)
 	int err = 0;
 	__u32 to_read;
 	unsigned int type=-1;
+    /*unsigned char read10CmdBlk[10] = {40, 0, 0, 0, 0, 8, 0, 0, 8 , 0};
+    struct scatterlist * sg = NULL;
+    unsigned char * sg_buf = NULL;
+    Target_Scsi_Cmnd * cmd = (Target_Scsi_Cmnd *)kmalloc(sizeof(Target_Scsi_Cmnd), GFP_KERNEL);
+    int i;
+
+    sg = (struct scatterlist *)kmalloc(sizeof(struct scatterlist)*1 , GFP_KERNEL);
+    sg_init_table(sg, 1);
+    for (i = 0; i < 1; i++) {
+        sg_buf = (unsigned char *)__get_free_pages(GFP_KERNEL, 0);
+        sg_set_buf(&sg[i],(void *)sg_buf, PAGE_SIZE);
+    }
+    cmd->stml_devp = target_data.devlist->next->next->next;
+    get_space(cmd, 4096);
+    cmd->id = 999;
+    scsi_execute_async(cmd->stml_devp->devp, read10CmdBlk, 10, DMA_FROM_DEVICE, cmd->sglist, cmd->buf_len, cmd->use_sg , TE_TIMEOUT, TE_TRY, cmd, te_cmnd_processed, GFP_KERNEL);*/
 
 	if(cmnd->stml_devp)
 	{
@@ -3014,6 +2868,7 @@ static int handle_cmd (Target_Scsi_Cmnd *cmnd)
 
 			/* hand it off to the mid-level to deal with */
 			//scsi_do_req (cmnd->req, cmnd->cmd, cmnd->req->sr_buffer, cmnd->req->sr_bufflen, te_cmnd_processed, TE_TIMEOUT, TE_TRY);
+            //printk("cmd in scsi device : %d %d %d , len : %d cmd-len %d\n", cmnd->stml_devp->id, cmnd->stml_devp->lun, cmnd->stml_devp->channel, to_read, cmnd->len);
             scsi_execute_async(cmnd->stml_devp->devp, cmnd->cmd, cmnd->len, DMA_FROM_DEVICE, cmnd->sglist, cmnd->buf_len, cmnd->use_sg, TE_TIMEOUT, TE_TRY, cmnd, te_cmnd_processed, GFP_KERNEL);
 
 			err = 0;
@@ -4043,6 +3898,7 @@ static void te_cmnd_processed (void * data, char * sense, int result, int datale
         te_cmd->result = result;
         if (result)
 		    printk ("Error when processing cmd %p id: %d with result %d\n", te_cmd, te_cmd->id, result);
+        else printk ("cmd %d succeed!\n", te_cmd->id);
         if (sense)
             memcpy(te_cmd->sense, sense, SCSI_SENSE_BUFFERSIZE);
         else

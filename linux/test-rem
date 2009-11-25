@@ -1,0 +1,2 @@
+rmmod isp_scsi_target
+rmmod mid_target

@@ -32,7 +32,7 @@ LNX_DIR			=	${TDIR}/linux
 XXX_DIR			=	${TDIR}/tools
 MOD_NAME		?=	isp
 
-STG_SRC			=	scsi_target_test.c scsi_target_ctl.c mid_target.c
+STG_SRC			=	scsi_target_verify.c scsi_target_ctl.c mid_target.c
 XXX_SRC			:=	$(notdir $(wildcard ${XXX_DIR}/*.c))
 
 EXTRA_CFLAGS		+=	-g -Wall -Werror -Idrivers/scsi -I${COM_DIR} -I${LNX_DIR} -I${TDIR}/firmware -DISP_NAME=\"${MOD_NAME}\"
@@ -42,7 +42,7 @@ ifdef ISP_TARGET_MODE
 EXTRA_CFLAGS		+=	-DISP_TARGET_MODE=1 -DISP_DEFAULT_ROLES=ISP_ROLE_TARGET
 
 obj-m			:=	${MOD_NAME}_mod.o isp_scsi_target.o mid_target.o
-isp_scsi_target-objs	:=	scsi_target_test.o
+isp_scsi_target-objs	:=	scsi_target_verify.o
 
 else
 
