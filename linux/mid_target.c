@@ -1700,6 +1700,87 @@ static int time_out(Target_Scsi_Cmnd * cmd)
     return 0;
 }
 
+static __u32 get_cmd_length(unsigned char * cmd, unsigned int type)
+{
+    __u32 err = 0;
+
+	switch (cmd[0]) {
+		case MODE_SENSE:
+		case MODE_SELECT:
+		case REQUEST_SENSE:
+        case RELEASE:
+		{
+			err = 6;
+			break;
+		}
+
+		case WRITE_10:
+		case READ_10:
+		case VERIFY:
+		case WRITE_VERIFY:
+        case RELEASE_10:
+        case READ_CAPACITY:
+        case SEEK_10:
+		case READ_DEFECT_DATA:
+		case READ_LONG:
+		case WRITE_LONG:
+		case LOG_SELECT:
+		case LOG_SENSE:
+		case PERSISTENT_RESERVE_OUT:
+		case PERSISTENT_RESERVE_IN:
+		case MODE_SELECT_10:
+		case MODE_SENSE_10:
+		case READ_BUFFER:
+		case WRITE_BUFFER:
+        case PRE_FETCH:
+        case SET_LIMITS:
+        case SYNCHRONIZE_CACHE:
+        case WRITE_SAME:
+		{
+			err = 10;
+			break;
+		}
+
+        case READ_12:
+        case WRITE_12:
+        case WRITE_VERIFY_12:
+		case REPORT_LUNS:
+        {
+            err = 12;
+            break;
+		}
+
+        case LOCK_UNLOCK_CACHE:
+        {
+            err = 16;
+            break;
+        }
+		case INQUIRY:
+		case SEND_DIAGNOSTIC:
+		case RECEIVE_DIAGNOSTIC:
+        case RESERVE:
+        case TEST_UNIT_READY:
+		case READ_6:
+		case WRITE_6:
+        case WRITE_FILEMARKS:
+        case SPACE:
+        case START_STOP:
+        case ERASE:
+        {
+            err = 6;
+			break;
+		}
+
+		default:
+		{
+            err = 10;
+			printk ("get_allocation_length: cmd  %2x  length %d\n", cmd[0],err);
+			break;
+		}
+	}
+	return err;
+}
+
 /*
  * get_allocation_length: This function looks at the received command
  * and calculates the size of the buffer to be allocated in order to
@@ -1859,6 +1940,35 @@ static __u32 get_allocation_length (unsigned char* cmd, unsigned int type)
 		}
 	}
 	return err;
+}
+
+/* cdeng August 24 2002
+ * get_report_luns_response: This function fills up the buffer to
+ * respond to a received REPORT_LUNS. This function is relevant when
+ * the emulator is responding to the commands.
+ * INPUT: Target_Scsi_Cmnd pointer to the REPORT_LUNS
+ * OUTPUT: 0 if everything is okay, < 0 if there is trouble
+ */
+static inline int get_report_luns_response (Target_Scsi_Cmnd * cmd, unsigned int len)
+{
+    unsigned char *buffer = (unsigned char *)sg_virt(cmd->sglist);
+    if (len > PAGE_SIZE) {
+        printk("err : report luns size > PAGE SIZE\n");
+    }
+    
+    memset (buffer, 0x00, len);
+    buffer[3] = 16;  // lun list length to support 8 luns in file mode
+	buffer[9] = 32; // lun 1
+	/*
+	buffer[23] = 1; // lun 1
+	buffer[31] = 2; // lun 2
+	buffer[39] = 3; // lun 3
+	buffer[47] = 4; // lun 4
+	buffer[55] = 5; // lun 5
+	buffer[63] = 6; // lun 6
+	buffer[71] = 7; // lun 7
+	*/
+    return (0);
 }
 
 /*
@@ -2307,9 +2417,9 @@ static inline int close_scsi_device (void)
  */
 static int handle_cmd (Target_Scsi_Cmnd *cmnd)
 {
-	int err = 0;
-	__u32 to_read;
-	unsigned int type=-1;
+    int err = 0,i;
+    __u32 to_read;
+    unsigned int type=-1;
     /*unsigned char read10CmdBlk[10] = {40, 0, 0, 0, 0, 8, 0, 0, 8 , 0};
     struct scatterlist * sg = NULL;
     unsigned char * sg_buf = NULL;
@@ -2327,20 +2437,22 @@ static int handle_cmd (Target_Scsi_Cmnd *cmnd)
     cmd->id = 999;
     scsi_execute_async(cmd->stml_devp->devp, read10CmdBlk, 10, DMA_FROM_DEVICE, cmd->sglist, cmd->buf_len, cmd->use_sg , TE_TIMEOUT, TE_TRY, cmd, te_cmnd_processed, GFP_KERNEL);*/
 
-	if(cmnd->stml_devp)
-	{
-		type = cmnd->stml_devp->type;
+    if(cmnd->stml_devp)
+    {
+        type = cmnd->stml_devp->type;
+        cmnd->len = get_cmd_length(cmnd->cmd, type);
         if (cmnd->stml_devp->devp == NULL) {
             printk("handle_cmd: cmnd->stml_devp->devp is NULL!\n");
         }
-	} else {
-		printk("handle_cmnd:the cmnd->stml_devp is NULL\n");
-	}
+    } else {
+        printk("handle_cmnd:the cmnd->stml_devp is NULL\n");
+    }
 	
 # ifdef DEBUG_HANDLE_CMD
-	printk ("Entering handle_cmd : command id %d, %llx\n",cmnd->id, cmnd->tmd_tag);
+    printk ("Entering handle_cmd : command id %d, %llx\n",cmnd->id, cmnd->tmd_tag);
+    printk ("To target host %d target %d channel %d", cmnd->stml_devp->host_no, cmnd->stml_devp->id, cmnd->stml_devp->channel);
 # endif
-	switch (cmnd->cmd[0]) {
+    switch (cmnd->cmd[0]) {
 		case READ_CAPACITY:
 		{
 # ifdef DEBUG_HANDLE_CMD
@@ -2413,6 +2525,9 @@ static int handle_cmd (Target_Scsi_Cmnd *cmnd)
         {
 # ifdef DEBUG_HANDLE_CMD
             printk ("REPORT_LUNS received\n");
+            for (i = 0; i < 16; i ++)
+                printk("%x", cmnd->cmd[i]);
+            printk("\n");
 # endif
             /* perform checks on REPORT_LUNS - LATER */
 
@@ -2444,10 +2559,11 @@ static int handle_cmd (Target_Scsi_Cmnd *cmnd)
             /* hand it off to the mid-level to deal with */
             //scsi_do_req (cmnd->req, cmnd->cmd, cmnd->req->sr_buffer, cmnd->req->sr_bufflen, te_cmnd_processed, TE_TIMEOUT, TE_TRY);
             // warning by netbear : temporarily commented
-			// get_report_luns_response(cmnd->req,to_read);
-            scsi_execute_async(cmnd->stml_devp->devp, cmnd->cmd, cmnd->len, DMA_FROM_DEVICE, cmnd->sglist, cmnd->buf_len, cmnd->use_sg, TE_TIMEOUT, TE_TRY, cmnd, te_cmnd_processed, GFP_KERNEL);
+			get_report_luns_response(cmnd,to_read);
+            //scsi_execute_async(cmnd->stml_devp->devp, cmnd->cmd, cmnd->len, DMA_FROM_DEVICE, cmnd->sglist, cmnd->buf_len, cmnd->use_sg, TE_TIMEOUT, TE_TRY, cmnd, te_cmnd_processed, GFP_KERNEL);
             err = 0;
             CommandType[2]++;
+            cmnd->state = ST_DONE;
             break;
         }
 
