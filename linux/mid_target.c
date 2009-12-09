@@ -17,7 +17,7 @@
 //# define DEBUG_ALLOCN_LEN
 //# define DEBUG_RX_DATA
 # define DEBUG_HANDLE_CMD
-//# define DEBUG_SCSI_THREAD
+# define DEBUG_SCSI_THREAD
 //# define DEBUG_TE_CMD
 
 
@@ -940,6 +940,11 @@ Target_Scsi_Cmnd *rx_cmnd (Scsi_Target_Device *device, __u64 target_id,
             command->len       = MAX_COMMAND_SIZE;
         }
         command->cmnd_read_buffer = 0;
+        command->sglist = NULL;
+        command->use_sg = 0;
+        command->sglist_len = 0;
+        command->result = 0;
+        command->tmd_handle = NULL;
         command->timeout       = jiffies + 480*100*HZ; 
 
 # if defined (FILEIO) || defined (GENERICIO)
@@ -1968,6 +1973,8 @@ static inline int get_report_luns_response (Target_Scsi_Cmnd * cmd, unsigned int
 	buffer[63] = 6; // lun 6
 	buffer[71] = 7; // lun 7
 	*/
+    cmd->result = 0;
+    memset(cmd->sense, 0, sizeof(cmd->result));
     return (0);
 }
 
@@ -2450,7 +2457,7 @@ static int handle_cmd (Target_Scsi_Cmnd *cmnd)
 	
 # ifdef DEBUG_HANDLE_CMD
     printk ("Entering handle_cmd : command id %d, %llx\n",cmnd->id, cmnd->tmd_tag);
-    printk ("To target host %d target %d channel %d", cmnd->stml_devp->host_no, cmnd->stml_devp->id, cmnd->stml_devp->channel);
+    printk ("To target host %d target %d channel %d\n", cmnd->stml_devp->host_no, cmnd->stml_devp->id, cmnd->stml_devp->channel);
 # endif
     switch (cmnd->cmd[0]) {
 		case READ_CAPACITY:

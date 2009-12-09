@@ -167,7 +167,7 @@
 #define COPYIN(uarg, karg, amt)     copy_from_user(karg, uarg, amt)
 #define COPYOUT(karg, uarg, amt)    copy_to_user(uarg, karg, amt)
 
-//#define DEBUG_ISP_XMIT
+#define DEBUG_ISP_XMIT
 
 char sg_buf[PAGE_SIZE];
 
