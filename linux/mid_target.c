@@ -15,7 +15,7 @@
 //# define DEBUG_RX_CMND
 //# define DEBUG_SCSI_DONE
 //# define DEBUG_ALLOCN_LEN
-//# define DEBUG_RX_DATA
+# define DEBUG_RX_DATA
 # define DEBUG_HANDLE_CMD
 # define DEBUG_SCSI_THREAD
 //# define DEBUG_TE_CMD
@@ -1059,6 +1059,9 @@ EXPORT_SYMBOL(rx_cmnd);
 int scsi_rx_data (Target_Scsi_Cmnd *the_command)
 {
 		Target_Scsi_Cmnd	*curr = target_data.cmd_queue_start;
+# ifdef DEBUG_RX_DATA
+        printk("rx_data: receive command\n");
+# endif
 
 		if (!the_command) {
 				printk ("rx_data: cannot deal with NULL command\n");

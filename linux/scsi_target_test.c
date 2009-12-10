@@ -304,7 +304,7 @@ typedef struct Isp_Device{
 #define    SDprintk3    if (scsi_tdebug > 2) printk
 
 
-static int scsi_tdebug = 0;
+static int scsi_tdebug = 1;
 
 static int
 scsi_target_ioctl(struct inode *, struct file *, unsigned int, unsigned long);
@@ -1009,7 +1009,6 @@ scsi_target_handler(qact_e action, void *arg)
             } else {
                     printk(KERN_WARNING "scsi_target: ABORT_TASK[%llx] found %d into global waitq\n", tmd->cd_tagval, i);
             }
-            spin_unlock_irqrestore(&scsi_target_lock, flags);
         } else if (np->nt_ncode == NT_TARGET_RESET) {
             int i;
             struct bus_chan *bc = &bp->bchan[np->nt_channel];
@@ -1018,13 +1017,14 @@ scsi_target_handler(qact_e action, void *arg)
                 for (ini = bc->list[i]; ini; ini = ini->ini_next) {
                     add_sdata(ini, ua);
                 }
+                printk(KERN_INFO "%s: NT TARGET RESET from 0x%llx for lun %u\n", __func__, np->nt_wwn, np->nt_lun);
             }
         } else if (np->nt_ncode == NT_LUN_RESET) {
             printk(KERN_INFO "%s: LUN RESET from 0x%llx for lun %u\n", __func__, np->nt_wwn, np->nt_lun);
         } else {
-            spin_unlock_irqrestore(&scsi_target_lock, flags);
             SDprintk("scsi_target: MGT code %x from %s%d\n", np->nt_ncode, bp->h.r_name, bp->h.r_inst);
         }
+        spin_unlock_irqrestore(&scsi_target_lock, flags);
         (*bp->h.r_action)(QIN_NOTIFY_ACK, arg);
         break;
     }
@@ -1099,7 +1099,7 @@ scsi_target_thread(void *arg)
             spin_unlock_irqrestore(&scsi_target_lock, flags);
             SDprintk3("scsi_task_thread sleeping\n");
             if (down_interruptible(&scsi_thread_sleep_semaphore)) {
-                SDprintk3("scsi_task_thread interrupted\n");
+                SDprintk("scsi_task_thread interrupted\n");
                 spin_lock_irqsave(&scsi_target_lock, flags);
                 continue;
             }
@@ -1545,6 +1545,7 @@ isp_xmit_response(Target_Scsi_Cmnd* cmnd)
     if (xact->td_xfrlen != 0) {
         if (xact->td_data == NULL) {
             printk("oops : in xmit_response, sg list is NULL while xfrlen is not zero!\n");
+            spin_unlock_irqrestore(&scsi_target_lock, flags);
             return -1;
         }
 #ifdef DEBUG_ISP_XMIT
@@ -1592,9 +1593,9 @@ isp_rdy_to_xfer(Target_Scsi_Cmnd* cmnd)
 
     printk("in isp_rdy_to_xfer\n");
 		
+	down(&scsi_thread_tmd_semaphore);
 	spin_lock_irqsave(&scsi_target_lock, flags);
 
-	down(&scsi_thread_tmd_semaphore);
     tmp = (ISP_Device_t *)cmnd->device->dev_specific;
     if(tmp == NULL)
     {
@@ -1668,7 +1669,7 @@ isp_rdy_to_xfer(Target_Scsi_Cmnd* cmnd)
     if(xact->td_xfrlen == 0)
     {
         printk("rdy_to_xfer: no data to transfer, error!");
-        spin_unlock_irqrestore(&scsi_target_lock, flags);
+        //spin_unlock_irqrestore(&scsi_target_lock, flags);
         up(&scsi_thread_tmd_semaphore);
         scsi_target_ldfree(bp, xact, 0);
         if((*bp->h.r_action)!=NULL)
@@ -1695,11 +1696,11 @@ isp_rdy_to_xfer(Target_Scsi_Cmnd* cmnd)
         xact->td_hflags |= TDFH_DATA_IN;
     else if (cmnd->data_direction == DMA_TO_DEVICE)
         xact->td_hflags |= TDFH_DATA_OUT;
-    tmd->cd_flags |= CDF_PRIVATE_0;
+    tmd->cd_flags |= CDF_PRIVATE_1;
 	//printk("isp_rdy_to_xfer:here a tmd executed ok.\n");
 	xact->td_hflags &= ~TDFH_STSVALID;
     
-	spin_unlock_irqrestore(&scsi_target_lock, flags);
+	//spin_unlock_irqrestore(&scsi_target_lock, flags);
  	up(&scsi_thread_tmd_semaphore);
     if((*bp->h.r_action)!=NULL)	
         (*bp->h.r_action)(QIN_TMD_CONT, xact);
